@@ -4,6 +4,15 @@
 
 A dark-themed desktop inventory for electronic components (Electron, single `index.html`, works offline).
 
+## Download
+
+**Windows (portable, no install):** [PartVault.exe](https://github.com/mahdiqnb/PartVault/raw/main/downloads/PartVault.exe) (about 71 MB)
+
+دانلود نسخه‌ی ویندوز: فایل بالا را دانلود و اجرا کن، نصب لازم نیست.
+اگر ویندوز هشدار SmartScreen داد (چون exe امضای دیجیتال ندارد)، روی «More info» و بعد «Run anyway» بزن.
+
+SHA-256: `a716e5d8cfd56d8a388c09d6089a88edd765327d99ba58e84af6d9e318b95249`
+
 ## Features
 
 - Parts with category, package, exact quantity or approximate level (plenty / medium / low / out), minimum stock alert, part number and datasheet link
