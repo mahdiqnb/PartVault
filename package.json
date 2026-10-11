@@ -1,0 +1,45 @@
+{
+  "name": "partvault",
+  "productName": "PartVault",
+  "version": "1.0.0",
+  "description": "PartVault - electronic component inventory",
+  "author": "Mehdi Ghanbarian",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64"
+  },
+  "build": {
+    "appId": "com.mehdighanbarian.partvault",
+    "productName": "PartVault",
+    "files": [
+      "main.js",
+      "index.html",
+      "icon.png",
+      "fonts/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "compression": "maximum",
+    "win": {
+      "icon": "icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "PartVault.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
