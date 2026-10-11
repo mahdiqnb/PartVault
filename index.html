@@ -130,6 +130,15 @@ select:focus,.in:focus{border-color:var(--gold);outline:none;box-shadow:0 0 0 3p
 .table{border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);overflow:hidden}
 .thead,.row{display:grid;grid-template-columns:6.8rem minmax(0,1fr) 6.5rem 11.4rem 5.4rem;gap:.9rem;align-items:center;padding:.65rem 1rem}
 .thead{color:var(--faint);font-size:.76rem;letter-spacing:.04em;background:var(--bg);border-bottom:1px solid var(--line-strong)}
+.th{display:inline-flex;align-items:center;gap:.35rem;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-align:start;cursor:pointer}
+.th:hover{color:var(--fg)}
+.th.on{color:var(--gold-hi)}
+.th .arr{font-size:.62rem}
+.grp{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.45rem 1rem;background:linear-gradient(90deg,rgba(232,166,60,.1),transparent 70%);border-bottom:1px solid var(--line-strong);color:var(--gold-hi);font-size:.82rem;font-weight:600}
+.grp i{font-style:normal;font-family:var(--font-code);font-size:.74rem;color:var(--muted)}
+.catlist{display:flex;flex-wrap:wrap;gap:.4rem}
+.catlist .pill{gap:.35rem;color:var(--fg)}
+.catlist .ib{width:1.6rem;height:1.6rem}
 .row{border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:0}
 .row:hover{background:linear-gradient(270deg,rgba(232,166,60,.07),transparent 70%)}
@@ -308,7 +317,7 @@ var CATS=[
 ];
 var LV=[['plenty','فراوان'],['mid','متوسط'],['low','کم'],['out','تمام‌شده']];
 var LVL={plenty:'فراوان',mid:'متوسط',low:'کم',out:'تمام‌شده'};
-var S={parts:[],boxes:[],view:'parts',q:'',tokens:[],cat:'',box:'',low:false,sort:'box',confirm:null,mode:'init',ready:{parts:false,boxes:false}};
+var S={parts:[],boxes:[],cats:[],view:'parts',q:'',tokens:[],cat:'',box:'',pkg:'',low:false,sort:'box',dir:'asc',confirm:null,mode:'init',ready:{parts:false,boxes:false,cats:false}};
 var cloud=null, dl=null, pend={}, timers={}, chain={}, seq=0;
 var LS='partvault.v1';
 
@@ -328,7 +337,34 @@ var ICON={
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toLatin(s){return String(s==null?'':s).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}).replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)})}
 function norm(s){return toLatin(s).toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/‌/g,'').replace(/\s+/g,' ').trim()}
-function catOf(k){for(var i=0;i<CATS.length;i++)if(CATS[i].k===k)return CATS[i];return CATS[CATS.length-1]}
+function allCats(){return CATS.concat(S.cats.slice().sort(function(a,b){return (a.createdAt||0)-(b.createdAt||0)}).map(function(c){return {k:c.id,n:c.name,p:c.prefix||'Z',custom:true}}))}
+var CI={};
+function buildCatIdx(){CI={};allCats().forEach(function(c,i){CI[c.k]=i})}
+function catIdx(k){return CI[k]==null?999:CI[k]}
+function catOf(k){var a=allCats();for(var i=0;i<a.length;i++)if(a[i].k===k)return a[i];return CATS[CATS.length-1]}
+function derivePrefix(name){var m=/[A-Za-z]/.exec(String(name));return m?m[0].toUpperCase():'Z'}
+var SI={p:1e-12,n:1e-9,u:1e-6,'µ':1e-6,m:1e-3,k:1e3,K:1e3,M:1e6,G:1e9,R:1,r:1};
+function valueOf(name){
+  var s=toLatin(name).replace(/،/g,'.');
+  var m=/^\s*(\d+)([pnuµmkKMGRr])(\d+)/.exec(s);
+  if(m)return parseFloat(m[1]+'.'+m[3])*(SI[m[2]]||1);
+  m=/^\s*(\d+(?:[.,]\d+)?)\s*([pnuµmkKMG]?)/.exec(s);
+  if(!m)return Infinity;
+  return parseFloat(m[1].replace(',','.'))*(SI[m[2]]||1);
+}
+function valCmp(a,b){var x=valueOf(a.name),y=valueOf(b.name);return x===y?0:(x<y?-1:1)}
+function sorter(a,b){
+  var ci=catIdx(a.cat)-catIdx(b.cat),pk=cmp(a.pkg||'~',b.pkg||'~'),nm=cmp(a.name,b.name);
+  switch(S.sort){
+    case 'cat':return ci||pk||valCmp(a,b)||nm;
+    case 'pkg':return pk||ci||valCmp(a,b)||nm;
+    case 'value':return ci||valCmp(a,b)||pk||nm;
+    case 'name':return nm;
+    case 'qty':return rank(a)-rank(b)||nm;
+    case 'new':return (b.updatedAt||0)-(a.updatedAt||0)||nm;
+    default:return cmp(a.box||'~',b.box||'~')||ci||pk||valCmp(a,b)||nm;
+  }
+}
 function cmp(a,b){return String(a).localeCompare(String(b),'en',{numeric:true})}
 function safeUrl(u){u=String(u||'').trim();return /^https?:\/\//i.test(u)?u:''}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -368,9 +404,9 @@ function pool(items,fn,n){
 }
 
 /* ---------- storage ---------- */
-function lsLoad(){try{var j=JSON.parse(localStorage.getItem(LS)||'null');if(j){S.parts=j.parts||[];S.boxes=j.boxes||[]}}catch(e){}}
-function lsSave(){try{localStorage.setItem(LS,JSON.stringify({parts:S.parts,boxes:S.boxes}))}catch(e){}}
-function arr(c){return c==='parts'?S.parts:S.boxes}
+function lsLoad(){try{var j=JSON.parse(localStorage.getItem(LS)||'null');if(j){S.parts=j.parts||[];S.boxes=j.boxes||[];S.cats=j.cats||[]}}catch(e){}}
+function lsSave(){try{localStorage.setItem(LS,JSON.stringify({parts:S.parts,boxes:S.boxes,cats:S.cats}))}catch(e){}}
+function arr(c){return c==='parts'?S.parts:c==='boxes'?S.boxes:S.cats}
 var api={
   set:async function(c,id,data){
     if(cloud){await cloud.collection(c).doc(id).set(data);return}
@@ -395,8 +431,9 @@ async function boot(){
     var onErr=function(e){toast(e&&e.code==='revoked'?errMsg(e):'اتصال به ذخیره‌سازی برقرار نشد.','bad')};
     db.collection('parts').onSnapshot(function(s){S.parts=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});S.ready.parts=true;renderAll()},onErr);
     db.collection('boxes').onSnapshot(function(s){S.boxes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});S.ready.boxes=true;renderAll()},onErr);
+    db.collection('cats').onSnapshot(function(s){S.cats=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});S.ready.cats=true;renderAll()},onErr);
   }else{
-    S.mode='local';lsLoad();S.ready.parts=S.ready.boxes=true;
+    S.mode='local';lsLoad();S.ready.parts=S.ready.boxes=S.ready.cats=true;
   }
   renderAll();
 }
@@ -406,22 +443,20 @@ function hay(p){var b=boxById(p.box);return norm([p.name,catOf(p.cat).n,p.pkg,p.
 function filtered(){
   var list=S.parts.filter(function(p){
     if(S.cat&&p.cat!==S.cat)return false;
+    if(S.pkg&&(p.pkg||'')!==S.pkg)return false;
     if(S.box){if(S.box==='__none'){if(p.box)return false}else if(p.box!==S.box)return false}
     if(S.low&&status(p)==='ok')return false;
     if(S.tokens.length){var h=hay(p);for(var i=0;i<S.tokens.length;i++)if(h.indexOf(S.tokens[i])<0)return false}
     return true;
   });
-  list.sort(function(a,b){
-    if(S.sort==='name')return cmp(a.name,b.name);
-    if(S.sort==='qty')return rank(a)-rank(b)||cmp(a.name,b.name);
-    if(S.sort==='new')return (b.updatedAt||0)-(a.updatedAt||0);
-    var ab=a.box||'~',bb=b.box||'~';return cmp(ab,bb)||cmp(a.name,b.name);
-  });
+  buildCatIdx();
+  list.sort(sorter);
+  if(S.dir==='desc')list.reverse();
   return list;
 }
 
 /* ---------- render ---------- */
-function loading(){return S.mode==='init'||(S.mode==='cloud'&&!(S.ready.parts&&S.ready.boxes))}
+function loading(){return S.mode==='init'||(S.mode==='cloud'&&!(S.ready.parts&&S.ready.boxes&&S.ready.cats))}
 function renderAll(){renderStats();renderTabs();renderParts();renderBoxes();renderData()}
 function renderStats(){
   var units=0,low=0;
@@ -452,26 +487,44 @@ function renderParts(){
   }
   var counts={};S.parts.forEach(function(p){counts[p.cat]=(counts[p.cat]||0)+1});
   var chips='<button class="chip" data-act="chip" data-cat="" aria-pressed="'+(!S.cat)+'">همه <i>'+S.parts.length+'</i></button>'+
-    CATS.filter(function(c){return counts[c.k]}).map(function(c){return '<button class="chip" data-act="chip" data-cat="'+c.k+'" aria-pressed="'+(S.cat===c.k)+'">'+esc(c.n)+' <i>'+counts[c.k]+'</i></button>'}).join('');
+    allCats().filter(function(c){return counts[c.k]}).map(function(c){return '<button class="chip" data-act="chip" data-cat="'+c.k+'" aria-pressed="'+(S.cat===c.k)+'">'+esc(c.n)+' <i>'+counts[c.k]+'</i></button>'}).join('');
   var hasNone=S.parts.some(function(p){return !p.box});
   var boxOpts='<option value="">همه باکس‌ها</option>'+(hasNone?'<option value="__none"'+(S.box==='__none'?' selected':'')+'>بدون باکس</option>':'')+
     S.boxes.slice().sort(function(a,b){return cmp(a.id,b.id)}).map(function(b){return '<option value="'+esc(b.id)+'"'+(S.box===b.id?' selected':'')+'>'+esc(b.id)+(b.title?' — '+esc(b.title):'')+'</option>'}).join('');
-  var sorts=[['box','کد باکس'],['name','نام'],['qty','کمترین موجودی'],['new','آخرین تغییر']];
+  var sorts=[['box','کد باکس'],['cat','نوع قطعه'],['pkg','اندازه / پکیج'],['value','مقدار (عددی)'],['name','نام'],['qty','کمترین موجودی'],['new','آخرین تغییر']];
+  var pkgSet={};S.parts.forEach(function(p){if(p.pkg)pkgSet[p.pkg]=1});
+  var pkgOpts='<option value="">همه</option>'+Object.keys(pkgSet).sort(cmp).map(function(k){return '<option value="'+esc(k)+'"'+(S.pkg===k?' selected':'')+'>'+esc(k)+'</option>'}).join('');
   var list=filtered();
   var sample=S.parts.some(function(p){return p.sample})||S.boxes.some(function(b){return b.sample});
   var h='';
   if(sample)h+='<div class="notice"><span>داده‌های نمونه در انبار هست. بعد از آشنایی با برنامه پاکشان کن.</span><button class="btn ghost sm" data-act="sample-clear">حذف داده‌های نمونه</button></div>';
   h+='<div class="bar"><div class="chips">'+chips+'</div><div class="ctrls">'+
     '<label class="sel" for="f-boxfilter">باکس</label><select id="f-boxfilter">'+boxOpts+'</select>'+
+    '<label class="sel" for="f-pkgfilter">پکیج</label><select id="f-pkgfilter">'+pkgOpts+'</select>'+
     '<label class="sel" for="f-sort">مرتب‌سازی</label><select id="f-sort">'+sorts.map(function(s){return '<option value="'+s[0]+'"'+(S.sort===s[0]?' selected':'')+'>'+s[1]+'</option>'}).join('')+'</select>'+
+    '<button class="chip" data-act="dir" title="جهت مرتب‌سازی">'+(S.dir==='asc'?'↑ صعودی':'↓ نزولی')+'</button>'+
     '<button class="chip" data-act="low-toggle" aria-pressed="'+S.low+'">فقط کم‌موجودی</button>'+
     '<span class="fill"></span><span class="count">'+list.length+' از '+S.parts.length+' قطعه</span></div></div>';
   if(!list.length){
     h+='<div class="empty"><h2>موردی پیدا نشد</h2><p>جستجو یا فیلترها را تغییر بده.</p><div class="acts"><button class="btn ghost" data-act="reset">پاک کردن فیلترها</button></div></div>';
   }else{
-    h+='<div class="table"><div class="thead"><span>باکس</span><span>قطعه</span><span>پکیج</span><span>موجودی</span><span></span></div>'+list.map(rowHTML).join('')+'</div>';
+    var th=function(k,t){return '<button class="th'+(S.sort===k?' on':'')+'" data-act="sortby" data-key="'+k+'">'+t+(S.sort===k?'<span class="arr">'+(S.dir==='asc'?'▲':'▼')+'</span>':'')+'</button>'};
+    h+='<div class="table"><div class="thead">'+th('box','باکس')+th('name','قطعه')+th('pkg','پکیج')+th('qty','موجودی')+'<span></span></div>'+rowsHTML(list)+'</div>';
   }
   el.innerHTML=h;
+}
+function groupOf(p){
+  if(S.sort==='box'){var b=boxById(p.box);return p.box?p.box+(b&&b.title?' · '+b.title:''):'بدون باکس'}
+  if(S.sort==='cat')return catOf(p.cat).n;
+  if(S.sort==='pkg')return p.pkg||'بدون پکیج';
+  return null;
+}
+function rowsHTML(list){
+  if(groupOf(list[0])===null)return list.map(rowHTML).join('');
+  var cnt={};list.forEach(function(p){var g=groupOf(p);cnt[g]=(cnt[g]||0)+1});
+  var last=null,h='';
+  list.forEach(function(p){var g=groupOf(p);if(g!==last){h+='<div class="grp"><span>'+esc(g)+'</span><i>'+cnt[g]+'</i></div>';last=g}h+=rowHTML(p)});
+  return h;
 }
 function ctrlHTML(p,id){
   if(isLvl(p)){
@@ -532,6 +585,11 @@ function renderData(){
      '<button class="btn ghost sm" data-act="export-parts">'+ICON.down+' قطعات</button><button class="btn ghost sm" data-act="export-boxes">'+ICON.down+' باکس‌ها</button></div></div>'+
    '<div class="panel"><h3>ورود از اکسل / CSV</h3><p>اگر فهرست قطعاتت را قبلاً در اکسل داری، آن را با «ذخیره به‌صورت CSV UTF-8» بساز و اینجا وارد کن. قطعه‌ای که نام، پکیج و باکس یکسان داشته باشد به‌روزرسانی می‌شود و باکس‌های جدید خودکار ساخته می‌شوند. برای قطعه‌ی بدون شمارش، در ستون «وضعیت موجودی» یکی از این‌ها را بنویس: فراوان، متوسط، کم، تمام‌شده.</p><div class="acts">'+
      '<label class="btn ghost sm" for="f-import" tabindex="0" id="lbl-import">'+ICON.up+' انتخاب فایل CSV</label><button class="btn ghost sm" data-act="template">'+ICON.down+' قالب نمونه</button></div></div>'+
+   '<div class="panel"><h3>دسته‌بندی‌ها</h3><p>دسته‌های آماده: مقاومت، خازن، سلف، دیود، ترانزیستور، آی‌سی و چند مورد دیگر. دسته‌ی جدید را همین‌جا یا موقع ثبت قطعه (گزینه‌ی «دسته‌بندی جدید») می‌سازی.</p>'+
+     '<div class="catlist">'+(S.cats.length?S.cats.slice().sort(function(a,b){return (a.createdAt||0)-(b.createdAt||0)}).map(function(c){
+        var n=S.parts.filter(function(p){return p.cat===c.id}).length;
+        return '<span class="pill">'+esc(c.name)+' · <b class="mono">'+esc(c.prefix||'Z')+'</b> · '+n+'<button class="ib" data-act="del-cat" data-id="'+esc(c.id)+'" title="حذف دسته" aria-label="حذف دسته '+esc(c.name)+'">'+ICON.trash+'</button></span>'}).join(''):'<span style="color:var(--faint);font-size:.85rem">هنوز دسته‌ی اضافه‌ای نساخته‌ای.</span>')+'</div>'+
+     '<div class="acts"><button class="btn ghost sm" data-act="add-cat">'+ICON.plus+' دسته‌بندی جدید</button></div></div>'+
    '<div class="panel"><h3>محل ذخیره</h3><div><span class="pill"><span class="led '+(cl?'':'warn')+'"></span>'+(cl?'ذخیره‌ی ابری، روی همه‌ی دستگاه‌ها':(desk?'ذخیره‌ی محلی، روی همین کامپیوتر':'ذخیره‌ی محلی، فقط همین مرورگر'))+'</span></div>'+
      '<p>'+(cl?'تغییرات بلافاصله ذخیره می‌شوند و با باز کردن صفحه از هر دستگاه دیده می‌شوند.':desk?'داده‌ها روی همین کامپیوتر ذخیره می‌شوند و بدون اینترنت هم کار می‌کنند. برای پشتیبان‌گیری یا انتقال به کامپیوتر دیگر از خروجی CSV استفاده کن.':'ذخیره‌ی ابری در این نمایش فعال نیست. داده‌ها فقط در همین مرورگر می‌مانند؛ پیش از پاک کردن اطلاعات مرورگر از انبار خروجی CSV بگیر.')+'</p>'+
      (S.parts.some(function(p){return p.sample})?'<div class="acts"><button class="btn ghost sm danger" data-act="sample-clear">حذف داده‌های نمونه</button></div>':'')+'</div>'+
@@ -560,8 +618,10 @@ function openPart(id){
   var lv=isLvl(o),cur=o.level||'plenty';
   var html='<form id="pf" novalidate><div class="fg">'+
     fld('name','نام / مقدار قطعه *',o.name,{full:true,ph:'مثلاً 10kΩ ±1%  یا  STM32F103C8T6'})+
-    '<div class="fld"><label for="f-cat">دسته</label><select id="f-cat">'+CATS.map(function(c){return '<option value="'+c.k+'"'+(o.cat===c.k?' selected':'')+'>'+esc(c.n)+'</option>'}).join('')+'</select></div>'+
-    fld('pkg','پکیج',o.pkg,{ltr:true,ph:'0603 / SOT-23 / THT'})+
+    '<div class="fld"><label for="f-cat">دسته</label><select id="f-cat">'+allCats().map(function(c){return '<option value="'+esc(c.k)+'"'+(o.cat===c.k?' selected':'')+'>'+esc(c.n)+'</option>'}).join('')+'<option value="__new">＋ دسته‌بندی جدید…</option></select></div>'+
+    fld('pkg','پکیج',o.pkg,{ltr:true,ph:'0603 / SOT-23 / THT',list:'pkglist'})+
+    fld('newcat','نام دسته‌بندی جدید',"",{wid:'w-newcat',hide:true,ph:'مثلاً پتانسیومتر'})+
+    fld('newprefix','پیشوند کد باکس',"",{ltr:true,wid:'w-newprefix',hide:true,ph:'P',hint:'۱ تا ۳ حرف لاتین. خالی بگذاری خودکار انتخاب می‌شود.'})+
     '<div class="fld full"><label for="f-qmode">نحوه‌ی ثبت موجودی</label><select id="f-qmode"><option value="count"'+(lv?'':' selected')+'>تعداد دقیق</option><option value="level"'+(lv?' selected':'')+'>تقریبی، بدون شمارش (فراوان / متوسط / کم)</option></select><span class="hint">برای قطعاتی مثل مقاومت 0805 که زیادند و شمردنشان لازم نیست.</span></div>'+
     fld('qty','تعداد',o.qty,{type:'number',ltr:true,wid:'w-qty',hide:lv})+
     fld('min','حداقل موجودی',o.min,{type:'number',ltr:true,wid:'w-min',hide:lv,hint:'زیر این عدد هشدار می‌گیری'})+
@@ -571,12 +631,14 @@ function openPart(id){
     fld('mpn','پارت‌نامبر',o.mpn,{ltr:true})+
     fld('link','لینک دیتاشیت',o.link,{full:true,ltr:true,ph:'https://'})+
     fld('note','توضیحات',o.note,{full:true,area:true})+
-    '</div><datalist id="boxlist">'+S.boxes.map(function(b){return '<option value="'+esc(b.id)+'">'+esc(b.title||'')+'</option>'}).join('')+'</datalist>'+
+    '</div><datalist id="pkglist">'+Object.keys(S.parts.reduce(function(m,p){if(p.pkg)m[p.pkg]=1;return m},{})).sort(cmp).map(function(k){return '<option value="'+esc(k)+'">'}).join('')+'</datalist><datalist id="boxlist">'+S.boxes.map(function(b){return '<option value="'+esc(b.id)+'">'+esc(b.title||'')+'</option>'}).join('')+'</datalist>'+
     '<div class="form-act"><button class="btn" type="submit">'+(p?'ذخیره تغییرات':'افزودن قطعه')+'</button><button class="btn ghost" type="button" data-act="close">انصراف</button></div></form>';
   openDrawer(p?'ویرایش قطعه':'قطعه جدید',html,function(){
     $('pf').addEventListener('submit',function(e){savePart(e,id)});
     var qm=$('f-qmode');
     qm.addEventListener('change',function(){var l=qm.value==='level';$('w-qty').hidden=l;$('w-min').hidden=l;$('w-level').hidden=!l});
+    var cs=$('f-cat');
+    cs.addEventListener('change',function(){var n=cs.value==='__new';$('w-newcat').hidden=!n;$('w-newprefix').hidden=!n;if(n)$('f-newcat').focus()});
   });
 }
 async function savePart(ev,id){
@@ -586,22 +648,60 @@ async function savePart(ev,id){
   if(!name){toast('نام یا مقدار قطعه را وارد کن.','bad');$('f-name').focus();return}
   var box=g('box').toUpperCase();
   if(box&&!/^[A-Z0-9_.\-]{1,24}$/.test(box)){toast('کد باکس فقط حروف لاتین، عدد و خط تیره دارد.','bad');$('f-box').focus();return}
+  var catKey=g('cat'),newCat=null;
+  if(catKey==='__new'){
+    var cname=g('newcat');
+    if(!cname){toast('نام دسته‌بندی جدید را وارد کن.','bad');$('f-newcat').focus();return}
+    var hit=allCats().filter(function(c){return norm(c.n)===norm(cname)})[0];
+    if(hit){catKey=hit.k}
+    else{
+      var pf=g('newprefix').toUpperCase()||derivePrefix(cname);
+      if(!/^[A-Z]{1,3}$/.test(pf)){toast('پیشوند کد باید ۱ تا ۳ حرف لاتین باشد.','bad');$('f-newprefix').focus();return}
+      newCat={id:'c_'+uid(),name:cname,prefix:pf,createdAt:Date.now()};catKey=newCat.id;
+    }
+  }
   var lv=g('qmode')==='level';
   var qty=lv?0:Math.max(0,parseInt(toLatin(g('qty')),10)||0),min=lv?0:Math.max(0,parseInt(toLatin(g('min')),10)||0);
   var old=id?S.parts.find(function(p){return p.id===id}):null;
-  var data={name:name,cat:g('cat'),pkg:g('pkg'),qmode:lv?'level':'count',level:lv?g('level'):'',qty:qty,min:min,box:box,mpn:g('mpn'),link:g('link'),note:g('note'),createdAt:(old&&old.createdAt)||Date.now(),updatedAt:Date.now()};
+  var data={name:name,cat:catKey,pkg:g('pkg'),qmode:lv?'level':'count',level:lv?g('level'):'',qty:qty,min:min,box:box,mpn:g('mpn'),link:g('link'),note:g('note'),createdAt:(old&&old.createdAt)||Date.now(),updatedAt:Date.now()};
   if(old&&old.sample)data.sample=true;
   try{
+    if(newCat){await api.set('cats',newCat.id,{name:newCat.name,prefix:newCat.prefix,createdAt:newCat.createdAt});if(cloud&&!S.cats.some(function(c){return c.id===newCat.id}))S.cats.push(newCat)}
     if(box&&!boxById(box))await api.set('boxes',box,{code:box,title:'',loc:'',note:'',createdAt:Date.now()});
     await api.set('parts',id||uid(),data);
     closeDrawer();toast(id?'تغییرات ذخیره شد.':'قطعه اضافه شد.');
   }catch(e){toast(errMsg(e),'bad')}
 }
+function openCat(){
+  var html='<form id="cf" novalidate><div class="fg">'+
+    fld('cname','نام دسته‌بندی *','',{full:true,ph:'مثلاً پتانسیومتر'})+
+    fld('cprefix','پیشوند کد باکس','',{ltr:true,ph:'P',hint:'۱ تا ۳ حرف لاتین. خالی بگذاری خودکار انتخاب می‌شود.'})+
+    '</div><div class="form-act"><button class="btn" type="submit">ساخت دسته‌بندی</button><button class="btn ghost" type="button" data-act="close">انصراف</button></div></form>';
+  openDrawer('دسته‌بندی جدید',html,function(){$('cf').addEventListener('submit',saveCat)});
+}
+async function saveCat(ev){
+  ev.preventDefault();
+  var name=$('f-cname').value.trim();
+  if(!name){toast('نام دسته‌بندی را وارد کن.','bad');$('f-cname').focus();return}
+  if(allCats().some(function(c){return norm(c.n)===norm(name)})){toast('این دسته‌بندی از قبل وجود دارد.','bad');return}
+  var pf=$('f-cprefix').value.trim().toUpperCase()||derivePrefix(name);
+  if(!/^[A-Z]{1,3}$/.test(pf)){toast('پیشوند کد باید ۱ تا ۳ حرف لاتین باشد.','bad');$('f-cprefix').focus();return}
+  var c={id:'c_'+uid(),name:name,prefix:pf,createdAt:Date.now()};
+  try{
+    await api.set('cats',c.id,{name:c.name,prefix:c.prefix,createdAt:c.createdAt});
+    if(cloud&&!S.cats.some(function(x){return x.id===c.id}))S.cats.push(c);
+    closeDrawer();renderAll();toast('دسته‌بندی ساخته شد.');
+  }catch(e){toast(errMsg(e),'bad')}
+}
+function delCat(id){
+  if(S.parts.some(function(p){return p.cat===id})){toast('قطعاتی در این دسته هستند. اول دسته‌ی آن‌ها را عوض کن.','bad');return}
+  api.del('cats',id).then(function(){if(cloud)S.cats=S.cats.filter(function(c){return c.id!==id});renderAll();toast('دسته‌بندی حذف شد.')}).catch(function(e){toast(errMsg(e),'bad')});
+}
 function openBox(code){
   var b=code?boxById(code):null;
   var o=b||{id:'',title:'',loc:'',note:''};
   var html='<form id="bf" novalidate><div class="fg">'+
-    (b?'':'<div class="fld"><label for="f-prefix">نوع باکس (پیشوند کد)</label><select id="f-prefix">'+CATS.map(function(c){return '<option value="'+c.p+'">'+c.p+' — '+esc(c.n)+'</option>'}).join('')+'</select></div>')+
+    (b?'':'<div class="fld"><label for="f-prefix">نوع باکس (پیشوند کد)</label><select id="f-prefix">'+allCats().map(function(c){return '<option value="'+esc(c.p)+'">'+esc(c.p)+' — '+esc(c.n)+'</option>'}).join('')+'</select></div>')+
     fld('code','کد باکس *',b?o.id:nextCode('R'),{ltr:true,ro:!!b,hint:b?'کد بعد از ساخت تغییر نمی‌کند.':'این کد را روی باکس بچسبان.'})+
     fld('title','عنوان',o.title,{full:true,ph:'مثلاً مقاومت 0603'})+
     fld('loc','محل نگهداری',o.loc,{full:true,ph:'مثلاً کشوی ۲، طبقه بالا'})+
@@ -670,9 +770,10 @@ var HRAW={name:'name',نام:'name','نام/مقدار':'name','نام / مقد�
 var HMAP={};Object.keys(HRAW).forEach(function(k){HMAP[norm(k)]=HRAW[k]});
 function catFromText(t){
   var x=norm(t);if(!x)return 'oth';
-  for(var i=0;i<CATS.length;i++){var c=CATS[i];if(c.k===x||norm(c.n)===x||c.p.toLowerCase()===x)return c.k}
-  for(var j=0;j<CATS.length;j++){var n=norm(CATS[j].n);if(n.indexOf(x)===0||x.indexOf(norm(CATS[j].n.split(' ')[0]))===0)return CATS[j].k}
-  return 'oth';
+  var A=allCats();
+  for(var i=0;i<A.length;i++){var c=A[i];if(c.k===x||norm(c.n)===x||c.p.toLowerCase()===x)return c.k}
+  for(var j=0;j<A.length;j++){var n=norm(A[j].n);if(n.indexOf(x)===0||x.indexOf(norm(A[j].n.split(' ')[0]))===0)return A[j].k}
+  return null;
 }
 function levelFromText(t){
   var x=norm(t);if(!x)return '';
@@ -689,14 +790,16 @@ async function importCSV(text){
   var cols=rows[0].map(function(h){return HMAP[norm(h)]||null});
   if(cols.indexOf('name')<0){toast('ستون «نام» در فایل پیدا نشد. از «قالب نمونه» استفاده کن.','bad');return}
   var existing={};S.parts.forEach(function(p){existing[pkey(p)]=p});
-  var items=[],newBoxes={},seen={};
+  var items=[],newBoxes={},newCats={},seen={};
   rows.slice(1).forEach(function(r){
     var o={};cols.forEach(function(k,i){if(k&&o[k]==null||k&&o[k]==='')o[k]=String(r[i]==null?'':r[i]).trim()});
     if(!o.name)return;
     var box=(o.box||'').toUpperCase().replace(/\s+/g,'');
     if(box&&!/^[A-Z0-9_.\-]{1,24}$/.test(box))box='';
     var lv=levelFromText(o.level)||(isNaN(parseInt(toLatin(o.qty),10))?levelFromText(o.qty):'');
-    var p={name:o.name,cat:catFromText(o.cat),pkg:o.pkg||'',qmode:lv?'level':'count',level:lv||'',qty:lv?0:Math.max(0,parseInt(toLatin(o.qty),10)||0),min:lv?0:Math.max(0,parseInt(toLatin(o.min),10)||0),box:box,mpn:o.mpn||'',link:o.link||'',note:o.note||''};
+    var ck=catFromText(o.cat);
+    if(ck===null){var nk=norm(o.cat);if(!newCats[nk])newCats[nk]={id:'c_'+uid(),name:String(o.cat).trim(),prefix:derivePrefix(o.cat),createdAt:Date.now()};ck=newCats[nk].id}
+    var p={name:o.name,cat:ck,pkg:o.pkg||'',qmode:lv?'level':'count',level:lv||'',qty:lv?0:Math.max(0,parseInt(toLatin(o.qty),10)||0),min:lv?0:Math.max(0,parseInt(toLatin(o.min),10)||0),box:box,mpn:o.mpn||'',link:o.link||'',note:o.note||''};
     var k=pkey(p);if(seen[k])return;seen[k]=1;
     if(box&&!boxById(box))newBoxes[box]=1;
     var ex=existing[k];
@@ -705,6 +808,7 @@ async function importCSV(text){
   if(!items.length){toast('ردیف معتبری پیدا نشد.','bad');return}
   toast('در حال وارد کردن '+items.length+' قطعه…');
   try{
+    await pool(Object.keys(newCats),function(k){var c=newCats[k];return api.set('cats',c.id,{name:c.name,prefix:c.prefix,createdAt:c.createdAt}).then(function(){if(cloud&&!S.cats.some(function(x){return x.id===c.id}))S.cats.push(c)})});
     await pool(Object.keys(newBoxes),function(c){return api.set('boxes',c,{code:c,title:'',loc:'',note:'',createdAt:Date.now()})});
     await pool(items,function(it){var d=Object.assign({},it.data);delete d.id;return api.set('parts',it.id,d)});
     var u=items.filter(function(i){return i.upd}).length;
@@ -772,8 +876,12 @@ document.addEventListener('click',function(e){
     case 'chip':S.cat=t.dataset.cat;renderParts();break;
     case 'low-toggle':S.low=!S.low;renderStats();renderParts();break;
     case 'low-stat':S.low=!S.low;setView('parts');renderStats();renderParts();break;
-    case 'reset':S.cat='';S.box='';S.low=false;S.q='';S.tokens=[];$('q').value='';renderStats();renderParts();break;
+    case 'reset':S.cat='';S.box='';S.pkg='';S.low=false;S.q='';S.tokens=[];$('q').value='';renderStats();renderParts();break;
     case 'box-open':S.box=code;S.cat='';setView('parts');renderParts();window.scrollTo({top:0,behavior:'smooth'});break;
+    case 'dir':S.dir=S.dir==='asc'?'desc':'asc';renderParts();break;
+    case 'sortby':{var k=t.dataset.key;if(S.sort===k)S.dir=S.dir==='asc'?'desc':'asc';else{S.sort=k;S.dir='asc'}renderParts();break}
+    case 'add-cat':openCat();break;
+    case 'del-cat':delCat(id);break;
     case 'add-box':openBox();break;
     case 'edit-box':openBox(code);break;
     case 'del-box':
@@ -792,7 +900,8 @@ document.addEventListener('click',function(e){
 document.addEventListener('change',function(e){
   var t=e.target;
   if(t.id==='f-boxfilter'){S.box=t.value;renderParts()}
-  else if(t.id==='f-sort'){S.sort=t.value;renderParts()}
+  else if(t.id==='f-sort'){S.sort=t.value;S.dir='asc';renderParts()}
+  else if(t.id==='f-pkgfilter'){S.pkg=t.value;renderParts()}
   else if(t.classList&&t.classList.contains('qn')){setQty(t.dataset.id,toLatin(t.value))}
   else if(t.classList&&t.classList.contains('lvl')){setLevel(t.dataset.id,t.value)}
   else if(t.id==='f-import'){
