@@ -136,6 +136,8 @@ select:focus,.in:focus{border-color:var(--gold);outline:none;box-shadow:0 0 0 3p
 .th .arr{font-size:.62rem}
 .grp{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.45rem 1rem;background:linear-gradient(90deg,rgba(232,166,60,.1),transparent 70%);border-bottom:1px solid var(--line-strong);color:var(--gold-hi);font-size:.82rem;font-weight:600}
 .grp i{font-style:normal;font-family:var(--font-code);font-size:.74rem;color:var(--muted)}
+.dup{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin-bottom:1rem;padding:.8rem 1rem;border:1px solid var(--bad);border-radius:10px;background:rgba(255,77,109,.1);color:#ffd9de;font-size:.9rem}
+.dup b{color:var(--bad)}
 .catlist{display:flex;flex-wrap:wrap;gap:.4rem}
 .catlist .pill{gap:.35rem;color:var(--fg)}
 .catlist .ib{width:1.6rem;height:1.6rem}
@@ -616,7 +618,7 @@ function openPart(id){
   var preBox=(!p&&S.box&&S.box!=='__none')?S.box:'';
   var o=p||{name:'',cat:S.cat||'res',pkg:'',qty:1,min:0,box:preBox,mpn:'',link:'',note:'',qmode:'count',level:'plenty'};
   var lv=isLvl(o),cur=o.level||'plenty';
-  var html='<form id="pf" novalidate><div class="fg">'+
+  var html='<form id="pf" novalidate><div class="dup" id="dup-err" role="alert" hidden></div><div class="fg">'+
     fld('name','نام / مقدار قطعه *',o.name,{full:true,ph:'مثلاً 10kΩ ±1%  یا  STM32F103C8T6'})+
     '<div class="fld"><label for="f-cat">دسته</label><select id="f-cat">'+allCats().map(function(c){return '<option value="'+esc(c.k)+'"'+(o.cat===c.k?' selected':'')+'>'+esc(c.n)+'</option>'}).join('')+'<option value="__new">＋ دسته‌بندی جدید…</option></select></div>'+
     fld('pkg','پکیج',o.pkg,{ltr:true,ph:'0603 / SOT-23 / THT',list:'pkglist'})+
@@ -637,6 +639,7 @@ function openPart(id){
     $('pf').addEventListener('submit',function(e){savePart(e,id)});
     var qm=$('f-qmode');
     qm.addEventListener('change',function(){var l=qm.value==='level';$('w-qty').hidden=l;$('w-min').hidden=l;$('w-level').hidden=!l});
+    ['f-name','f-pkg','f-cat'].forEach(function(i){var e=$(i);var h=function(){var d=$('dup-err');if(d)d.hidden=true};e.addEventListener('input',h);e.addEventListener('change',h)});
     var cs=$('f-cat');
     cs.addEventListener('change',function(){var n=cs.value==='__new';$('w-newcat').hidden=!n;$('w-newprefix').hidden=!n;if(n)$('f-newcat').focus()});
   });
@@ -663,6 +666,11 @@ async function savePart(ev,id){
   var lv=g('qmode')==='level';
   var qty=lv?0:Math.max(0,parseInt(toLatin(g('qty')),10)||0),min=lv?0:Math.max(0,parseInt(toLatin(g('min')),10)||0);
   var old=id?S.parts.find(function(p){return p.id===id}):null;
+  if(!newCat){
+    var dk=dupKey({name:name,pkg:g('pkg'),cat:catKey});
+    var same=S.parts.filter(function(p){return p.id!==id&&dupKey(p)===dk});
+    if(same.length){showDup(same,name,g('pkg'));return}
+  }
   var data={name:name,cat:catKey,pkg:g('pkg'),qmode:lv?'level':'count',level:lv?g('level'):'',qty:qty,min:min,box:box,mpn:g('mpn'),link:g('link'),note:g('note'),createdAt:(old&&old.createdAt)||Date.now(),updatedAt:Date.now()};
   if(old&&old.sample)data.sample=true;
   try{
@@ -783,14 +791,24 @@ function levelFromText(t){
   if(/تمام|اتمام|ندارم|out|none/.test(x))return 'out';
   return '';
 }
-function pkey(p){return norm(p.name)+'|'+norm(p.pkg)+'|'+String(p.box||'').toUpperCase()}
+function dupKey(p){return norm(p.name).replace(/\s+/g,'')+'|'+norm(p.pkg||'').replace(/\s+/g,'')+'|'+(p.cat||'')}
+function boxLabel(code){if(!code)return 'بدون باکس';var b=boxById(code);return 'باکس '+code+(b&&b.title?' ('+b.title+')':'')}
+function showDup(same,name,pkg){
+  var seen={},where=[];
+  same.forEach(function(p){var l=boxLabel(p.box);if(!seen[l]){seen[l]=1;where.push(l)}});
+  var el=$('dup-err');if(!el)return;
+  el.innerHTML='<b>این قطعه قبلاً ثبت شده است.</b><span>«'+esc(name)+'»'+(pkg?' با پکیج '+esc(pkg):'')+' در '+esc(where.join(' و '))+' موجود است. برای افزودن تعداد، همان قطعه را ویرایش کن.</span>'+
+    '<button type="button" class="btn ghost sm" data-act="dup-edit" data-id="'+esc(same[0].id)+'">باز کردن قطعه‌ی موجود</button>';
+  el.hidden=false;if(el.scrollIntoView)el.scrollIntoView({block:'nearest'});
+  toast('قطعه‌ی تکراری: در '+where[0]+' موجود است.','bad');
+}
 async function importCSV(text){
   var rows=parseCSV(text);
   if(rows.length<2){toast('فایل خالی است یا ردیف داده ندارد.','bad');return}
   var cols=rows[0].map(function(h){return HMAP[norm(h)]||null});
   if(cols.indexOf('name')<0){toast('ستون «نام» در فایل پیدا نشد. از «قالب نمونه» استفاده کن.','bad');return}
-  var existing={};S.parts.forEach(function(p){existing[pkey(p)]=p});
-  var items=[],newBoxes={},newCats={},seen={};
+  var existing={};S.parts.forEach(function(p){existing[dupKey(p)]=p});
+  var items=[],newBoxes={},newCats={},seen={},skipped=[];
   rows.slice(1).forEach(function(r){
     var o={};cols.forEach(function(k,i){if(k&&o[k]==null||k&&o[k]==='')o[k]=String(r[i]==null?'':r[i]).trim()});
     if(!o.name)return;
@@ -800,19 +818,20 @@ async function importCSV(text){
     var ck=catFromText(o.cat);
     if(ck===null){var nk=norm(o.cat);if(!newCats[nk])newCats[nk]={id:'c_'+uid(),name:String(o.cat).trim(),prefix:derivePrefix(o.cat),createdAt:Date.now()};ck=newCats[nk].id}
     var p={name:o.name,cat:ck,pkg:o.pkg||'',qmode:lv?'level':'count',level:lv||'',qty:lv?0:Math.max(0,parseInt(toLatin(o.qty),10)||0),min:lv?0:Math.max(0,parseInt(toLatin(o.min),10)||0),box:box,mpn:o.mpn||'',link:o.link||'',note:o.note||''};
-    var k=pkey(p);if(seen[k])return;seen[k]=1;
-    if(box&&!boxById(box))newBoxes[box]=1;
+    var k=dupKey(p);if(seen[k]){skipped.push(p.name+' (تکراری در فایل)');return}seen[k]=1;
     var ex=existing[k];
+    if(ex&&(ex.box||'')!==box){skipped.push(p.name+' (از قبل در '+boxLabel(ex.box)+')');return}
+    if(box&&!boxById(box))newBoxes[box]=1;
     items.push({id:ex?ex.id:uid(),data:Object.assign({},ex||{},p,{createdAt:(ex&&ex.createdAt)||Date.now(),updatedAt:Date.now()}),upd:!!ex});
   });
-  if(!items.length){toast('ردیف معتبری پیدا نشد.','bad');return}
+  if(!items.length){toast(skipped.length?'همه‌ی قطعات تکراری بودند و وارد نشدند: '+skipped.slice(0,3).join('، ')+(skipped.length>3?' …':''):'ردیف معتبری پیدا نشد.','bad');return}
   toast('در حال وارد کردن '+items.length+' قطعه…');
   try{
     await pool(Object.keys(newCats),function(k){var c=newCats[k];return api.set('cats',c.id,{name:c.name,prefix:c.prefix,createdAt:c.createdAt}).then(function(){if(cloud&&!S.cats.some(function(x){return x.id===c.id}))S.cats.push(c)})});
     await pool(Object.keys(newBoxes),function(c){return api.set('boxes',c,{code:c,title:'',loc:'',note:'',createdAt:Date.now()})});
     await pool(items,function(it){var d=Object.assign({},it.data);delete d.id;return api.set('parts',it.id,d)});
     var u=items.filter(function(i){return i.upd}).length;
-    toast(items.length-u+' قطعه اضافه و '+u+' قطعه به‌روزرسانی شد.');
+    toast(items.length-u+' قطعه اضافه و '+u+' قطعه به‌روزرسانی شد.'+(skipped.length?' '+skipped.length+' قطعه‌ی تکراری وارد نشد: '+skipped.slice(0,2).join('، ')+(skipped.length>2?' …':''):''),skipped.length?'bad':'ok');
     S.view='parts';renderAll();
   }catch(e){toast(errMsg(e),'bad')}
 }
@@ -869,6 +888,7 @@ document.addEventListener('click',function(e){
     case 'go-data':setView('data');break;
     case 'add-part':openPart();break;
     case 'edit-part':openPart(id);break;
+    case 'dup-edit':openPart(id);break;
     case 'del-part':S.confirm='p:'+id;renderParts();break;
     case 'del-no':S.confirm=null;renderParts();renderBoxes();break;
     case 'del-yes':S.confirm=null;api.del('parts',id).then(function(){toast('قطعه حذف شد.')}).catch(function(er){toast(errMsg(er),'bad')});renderParts();break;
